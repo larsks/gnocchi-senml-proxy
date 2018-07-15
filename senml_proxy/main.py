@@ -9,6 +9,8 @@ def parse_args():
 
     p.add_argument('--mqtt-endpoint', '-m')
     p.add_argument('--gnocchi-endpoint', '-g')
+    p.add_argument('--topic', '-t',
+                   action='append')
 
     g = p.add_argument_group('Logging options')
     g.add_argument('--verbose', '-v',
@@ -30,6 +32,7 @@ def main():
     logging.basicConfig(level=args.loglevel)
 
     server = proxy.SenmlProxy(
+        topics=args.topic,
         gnocchi_endpoint=args.gnocchi_endpoint,
         mqtt_endpoint=args.mqtt_endpoint,
     )
