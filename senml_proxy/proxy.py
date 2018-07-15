@@ -41,9 +41,10 @@ class MQTTClient(threading.Thread):
     def on_connect(self, client, userdata, flags, rc):
         if self.disconnected:
             LOG.warning('reconnected to %s', self.app.mqtt_endpoint)
-            self.disconnected=False
+            self.disconnected = False
         else:
             LOG.info('connected to %s', self.app.mqtt_endpoint)
+
         self.subscribe()
 
     def on_disconnect(self, client, userdata, rc):
@@ -210,4 +211,3 @@ class SenmlProxy:
         with pkg_resources.resource_stream(__name__,
                                            'schema/senml.json') as fd:
             self.schema = json.load(fd)
-
