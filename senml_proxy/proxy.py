@@ -158,7 +158,7 @@ class GnocchiClient(threading.Thread):
                 time.sleep(5)
                 continue
             except gnocchiclient.exceptions.ClientException as err:
-                if isinstance(err.message, dict):
+                if isinstance(err.message, dict) and 'cause' in err.message:
                     message = err.message['cause']
                 else:
                     message = err.message
