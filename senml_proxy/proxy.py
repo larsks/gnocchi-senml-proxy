@@ -21,6 +21,7 @@ class MQTTClient(threading.Thread):
 
     def run(self):
         LOG.info('starting mqtt client')
+        self.disconnected = False
         self.connect_mqtt()
 
     def connect_mqtt(self):
@@ -31,14 +32,23 @@ class MQTTClient(threading.Thread):
 
         self.mqtt = paho.mqtt.client.Client()
         self.mqtt.on_connect = self.on_connect
+        self.mqtt.on_disconnect = self.on_disconnect
         self.mqtt.on_message = self.on_message
         self.mqtt.enable_logger()
         self.mqtt.connect(*m_hostport)
         self.mqtt.loop_forever()
 
     def on_connect(self, client, userdata, flags, rc):
-        LOG.info('connected to %s', self.app.mqtt_endpoint)
+        if self.disconnected:
+            LOG.warning('reconnected to %s', self.app.mqtt_endpoint)
+            self.disconnected=False
+        else:
+            LOG.info('connected to %s', self.app.mqtt_endpoint)
         self.subscribe()
+
+    def on_disconnect(self, client, userdata, rc):
+        self.disconnected = True
+        LOG.warning('disconnected from %s', self.app.mqtt_endpoint)
 
     def subscribe(self):
         LOG.info('subscribing to %s', self.app.topics)
@@ -78,7 +88,9 @@ class MQTTClient(threading.Thread):
             if 'v' in event:
                 measure['value'] = data.get('bv', 0) + event['v']
             elif 'vb' in event:
-                measure['value'] = event['v']
+                measure['value'] = event['vb']
+            elif 's' in event:
+                measure['value'] = data.get('bs', 0) + event['s']
 
             if not event['n'] in measures:
                 measures[event['n']] = {'measures': []}
