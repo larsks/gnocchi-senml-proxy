@@ -1,0 +1,108 @@
+{
+  "type": "object",
+  "required": [
+    "e"
+  ],
+  "properties": {
+    "bn": {
+      "type": "string",
+      "description": "base name, an optional field that replaces name if not provided or acts as a name prefix for every event"
+    },
+    "bu": {
+      "type": "string",
+      "description": "base unit, an optional field that acts as a unit if there is no unit provided for a particular event"
+    },
+    "bt": {
+      "type": "number",
+      "description": "base time, an optional field that acts as a time for events"
+    },
+    "e": {
+      "type": "array",
+      "minItems": 1,
+      "description": "events, a mandatory field containing array of events",
+      "items": {
+        "type": "object",
+        "oneOf": [
+          {
+            "required": [
+              "v"
+            ],
+            "not": {
+              "required": [
+                "bv",
+                "sv",
+                "s"
+              ]
+            }
+          },
+          {
+            "required": [
+              "bv"
+            ],
+            "not": {
+              "required": [
+                "v",
+                "sv",
+                "s"
+              ]
+            }
+          },
+          {
+            "required": [
+              "sv"
+            ],
+            "not": {
+              "required": [
+                "bv",
+                "sv",
+                "s"
+              ]
+            }
+          },
+          {
+            "required": [
+              "s"
+            ],
+            "not": {
+              "required": [
+                "bv",
+                "sv",
+                "v"
+              ]
+            }
+          }
+        ],
+        "properties": {
+          "n": {
+            "type": "string",
+            "description": "event name"
+          },
+          "t": {
+            "type": "number",
+            "description": "event time"
+          },
+          "u": {
+            "type": "string",
+            "description": "units"
+          },
+          "v": {
+            "type": "number",
+            "description": "numeric value"
+          },
+          "s": {
+            "type": "number",
+            "description": "sum value"
+          },
+          "sv": {
+            "type": "string",
+            "description": "string value"
+          },
+          "bv": {
+            "type": "boolean",
+            "description": "boolean value"
+          }
+        }
+      }
+    }
+  }
+}
