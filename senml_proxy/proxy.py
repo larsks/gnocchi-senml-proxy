@@ -109,13 +109,7 @@ class GnocchiClient(threading.Thread):
     def run(self):
         LOG.info('starting gnocchi client')
 
-        while True:
-            try:
-                self.connect_gnocchi()
-                break
-            except gnocchiclient.exceptions.ClientException as err:
-                LOG.error('failed to connect to gnocchi: %s', err)
-                time.sleep(5)
+        self.connect_gnocchi()
 
         while True:
             sensor_id, measures = self.app.q.get()
