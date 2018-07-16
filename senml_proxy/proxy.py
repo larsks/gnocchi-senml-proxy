@@ -4,8 +4,10 @@ import gnocchiclient.v1.client
 import json
 import jsonschema
 import logging
+import os
 import paho.mqtt.client
 import pkg_resources
+import pwd
 import queue
 import threading
 import time
@@ -14,46 +16,63 @@ import urllib
 LOG = logging.getLogger(__name__)
 
 
+def current_user():
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
 class MQTTClient(threading.Thread):
+    default_mqtt_endpoint = 'mqtt://localhost'
+    default_topics = ['sensor/#']
+
     def __init__(self, app):
         super().__init__(daemon=True)
         self.app = app
+
+        self.init_mqtt()
+
+    def init_mqtt(self):
+        self.mqtt = paho.mqtt.client.Client()
+        self.mqtt.on_connect = self.on_connect
+        self.mqtt.on_disconnect = self.on_disconnect
+        self.mqtt.on_message = self.on_message
+        self.mqtt.enable_logger()
+
+    def connect_mqtt(self):
+        mqtt_endpoint = self.app.config.get(
+            'mqtt_endpoint', self.default_mqtt_endpoint)
+
+        parts = urllib.parse.urlparse(mqtt_endpoint)
+        if parts.scheme != 'mqtt':
+            raise ValueError('unknown scheme in %s', mqtt_endpoint)
+
+        LOG.info('connecting to mqtt server @ %s', mqtt_endpoint)
+
+        m_hostport = [parts.hostname]
+        if parts.port:
+            m_hostport.append(parts.port)
+
+        self.mqtt.connect(*m_hostport)
+        self.mqtt.loop_forever()
 
     def run(self):
         LOG.info('starting mqtt client')
         self.disconnected = False
         self.connect_mqtt()
 
-    def connect_mqtt(self):
-        parts = urllib.parse.urlparse(self.app.mqtt_endpoint)
-        m_hostport = [parts.hostname]
-        if parts.port:
-            m_hostport.append(parts.port)
-
-        self.mqtt = paho.mqtt.client.Client()
-        self.mqtt.on_connect = self.on_connect
-        self.mqtt.on_disconnect = self.on_disconnect
-        self.mqtt.on_message = self.on_message
-        self.mqtt.enable_logger()
-        self.mqtt.connect(*m_hostport)
-        self.mqtt.loop_forever()
-
     def on_connect(self, client, userdata, flags, rc):
         if self.disconnected:
-            LOG.warning('reconnected to %s', self.app.mqtt_endpoint)
+            LOG.warning('reconnected to mqtt server')
             self.disconnected = False
         else:
-            LOG.info('connected to %s', self.app.mqtt_endpoint)
+            LOG.info('connected to mqtt server')
 
-        self.subscribe()
+        topics = self.app.config.get('topics', self.default_topics)
+        LOG.debug('subscribing to %s', topics)
+        self.mqtt.subscribe([(topic, 0) for topic in topics])
 
     def on_disconnect(self, client, userdata, rc):
         self.disconnected = True
-        LOG.warning('disconnected from %s', self.app.mqtt_endpoint)
-
-    def subscribe(self):
-        LOG.info('subscribing to %s', self.app.topics)
-        self.mqtt.subscribe([(topic, 0) for topic in self.app.topics])
+        LOG.warning('disconnected from mqtt server')
 
     def on_message(self, client, userdata, msg):
         try:
@@ -102,6 +121,8 @@ class MQTTClient(threading.Thread):
 
 
 class GnocchiClient(threading.Thread):
+    default_gnocchi_endpoint = 'http://localhost:8041'
+
     def __init__(self, app):
         super().__init__(daemon=True)
         self.app = app
@@ -116,19 +137,16 @@ class GnocchiClient(threading.Thread):
             self.publish(sensor_id, measures)
 
     def connect_gnocchi(self):
-        parts = urllib.parse.urlparse(self.app.gnocchi_endpoint)
-        if parts.port:
-            g_hostport = '{0.hostname}:{0.port}'.format(parts)
-        else:
-            g_hostport = '{0.hostname}'.format(parts)
+        gnocchi_username = self.app.config.get(
+            'gnocchi_username', current_user())
+        gnocchi_endpoint = self.app.config.get(
+            'gnocchi_endpoint', self.default_gnocchi_endpoint)
 
-        g_url = urllib.parse.urlunparse(
-            (parts.scheme, g_hostport, parts.path,
-             parts.params, parts.query, parts.fragment)
-        )
+        LOG.info('connecting to gnocchi server @ %s', gnocchi_endpoint)
+
         auth_plugin = gnocchiclient.auth.GnocchiBasicPlugin(
-            user=parts.username,
-            endpoint=g_url)
+            user=gnocchi_username,
+            endpoint=gnocchi_endpoint)
         self.gnocchi = gnocchiclient.v1.client.Client(
             session_options={'auth': auth_plugin})
 
@@ -154,7 +172,7 @@ class GnocchiClient(threading.Thread):
                 self.inner_publish(sensor_id, measures)
                 break
             except gnocchiclient.exceptions.ConnectionFailure:
-                LOG.warning('failed to connect to gnocchi')
+                LOG.warning('failed to connect to gnocchi (retrying)')
                 time.sleep(5)
                 continue
             except gnocchiclient.exceptions.ClientException as err:
@@ -169,23 +187,9 @@ class GnocchiClient(threading.Thread):
 
 
 class SenmlProxy:
-    topics = ['sensor/#']
-    gnocchi_endpoint = 'http://sensors@localhost:8041'
-    mqtt_endpoint = 'mqtt://localhost'
+    def __init__(self, config):
 
-    def __init__(self,
-                 topics=None,
-                 gnocchi_user=None,
-                 gnocchi_endpoint=None,
-                 mqtt_endpoint=None):
-
-        if topics is not None:
-            self.topics = topics
-        if gnocchi_endpoint is not None:
-            self.gnocchi_endpoint = gnocchi_endpoint
-        if mqtt_endpoint is not None:
-            self.mqtt_endpoint = mqtt_endpoint
-
+        self.config = config
         self.init_schema()
         self.init_queue()
 
@@ -193,13 +197,16 @@ class SenmlProxy:
         self.q = queue.Queue()
 
     def start(self):
-        self.mqtt = MQTTClient(self)
-        self.mqtt.start()
-        self.gnocchi = GnocchiClient(self)
-        self.gnocchi.start()
+        self.tasks = [MQTTClient(self),
+                      GnocchiClient(self)]
 
-        self.mqtt.join()
-        self.gnocchi.join()
+        LOG.debug('starting tasks')
+        for t in self.tasks:
+            t.start()
+
+        LOG.debug('waiting for tasks to finish')
+        for t in self.tasks:
+            t.join()
 
     def init_schema(self):
         with pkg_resources.resource_stream(__name__,
